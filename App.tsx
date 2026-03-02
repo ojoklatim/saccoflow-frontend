@@ -145,9 +145,14 @@ export default function App() {
   // On mount, check if there is an existing Supabase session
   useEffect(() => {
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
 
-      if (session) {
+        if (error || !session) {
+          setCurrentPage('landing');
+          return;
+        }
+
         // Fetch user profile to determine role
         const { data: profile } = await supabase
           .from('profiles')
@@ -160,7 +165,8 @@ export default function App() {
         } else {
           setCurrentPage('landing');
         }
-      } else {
+      } catch {
+        // If Supabase is not configured or unreachable, go to landing
         setCurrentPage('landing');
       }
     };
@@ -168,13 +174,16 @@ export default function App() {
     checkSession();
 
     // Listen for auth state changes (login/logout from other tabs, etc.)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
-        setCurrentPage('landing');
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    try {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (!session) {
+          setCurrentPage('landing');
+        }
+      });
+      return () => subscription.unsubscribe();
+    } catch {
+      // Supabase not configured, ignore listener
+    }
   }, []);
 
   const handleLogin = (role: string) => {
