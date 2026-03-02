@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from './supabase';
 import {
     LayoutDashboard, Users, ArrowRightLeft, CreditCard,
     FileText, ShieldAlert, LogOut, Bell, Menu, Plus, Search, Filter, Briefcase, X
@@ -8,44 +9,70 @@ import './dashboard.css';
 interface SaccoAdminProps { onLogout: () => void; }
 
 interface Member {
-    id: number; name: string; phone: string; email: string; status: 'Active' | 'Inactive'; dateJoined: string;
-}
-interface Transaction {
-    id: number; memberName: string; type: 'Deposit' | 'Withdrawal' | 'Loan'; amount: number; date: string; note: string;
-}
-interface Loan {
-    id: number; memberName: string; amount: number; purpose: string; status: 'Pending' | 'Approved' | 'Rejected'; date: string; repaymentDate: string;
-}
-interface AuditLog {
-    id: number; action: string; user: string; date: string; details: string;
+    id: string; // UUID from Supabase profiles
+    name: string;
+    phone: string;
+    email: string;
+    status: 'Active' | 'Inactive';
+    dateJoined: string;
 }
 
-const EMPTY_MEMBER: Omit<Member, 'id'> = { name: '', phone: '', email: '', status: 'Active', dateJoined: '' };
-const EMPTY_TXN: { memberId: string; type: Transaction['type']; amount: string; note: string } = { memberId: '', type: 'Deposit', amount: '', note: '' };
+interface Transaction {
+    id: string;
+    memberName: string;
+    type: 'Deposit' | 'Withdrawal' | 'Loan';
+    amount: number;
+    date: string;
+    note: string;
+}
+
+interface Loan {
+    id: string;
+    memberName: string;
+    memberId: string;
+    amount: number;
+    purpose: string;
+    status: 'Pending' | 'Approved' | 'Rejected';
+    date: string;
+    repaymentDate: string;
+}
+
+interface AuditLog {
+    id: string;
+    action: string;
+    user: string;
+    date: string;
+    details: string;
+}
 
 export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [activeTab, setActiveTab] = useState('dashboard');
-    const saccoName = 'Your SACCO';
+    const [saccoName, setSaccoName] = useState('Loading Sacco...');
+
+    // Auth context
+    const [saccoId, setSaccoId] = useState<string | null>(null);
+    const [userId, setUserId] = useState<string | null>(null);
 
     // Data state
     const [members, setMembers] = useState<Member[]>([]);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [loans, setLoans] = useState<Loan[]>([]);
-    const [auditLogs] = useState<AuditLog[]>([]);
+    const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+
+    // Stats state
+    const [totalSavings, setTotalSavings] = useState(0);
 
     // Modal state
-    const [showAddMember, setShowAddMember] = useState(false);
-    const [memberForm, setMemberForm] = useState({ ...EMPTY_MEMBER });
-    const [editMemberId, setEditMemberId] = useState<number | null>(null);
-
     const [showAddTxn, setShowAddTxn] = useState(false);
-    const [txnForm, setTxnForm] = useState({ ...EMPTY_TXN });
+    const [txnForm, setTxnForm] = useState({ memberId: '', type: 'Deposit', amount: '', note: '' });
 
     const [showNotif, setShowNotif] = useState(false);
     const [notifTitle, setNotifTitle] = useState('');
     const [notifBody, setNotifBody] = useState('');
     const [notifSent, setNotifSent] = useState(false);
+
+    const [loading, setLoading] = useState(false);
 
     // Filter state
     const [memberSearch, setMemberSearch] = useState('');
@@ -54,53 +81,158 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
     const [auditAction, setAuditAction] = useState('');
     const [auditDateFrom, setAuditDateFrom] = useState('');
     const [auditDateTo, setAuditDateTo] = useState('');
-    const [reportType, setReportType] = useState('members');
-    const [reportDateFrom, setReportDateFrom] = useState('');
-    const [reportDateTo, setReportDateTo] = useState('');
 
-    const nextId = useRef(1);
+    useEffect(() => {
+        loadAdminContext();
+    }, []);
 
-    // ─── Member handlers ───────────────────────────────────────
-    function openAddMember() { setMemberForm({ ...EMPTY_MEMBER }); setEditMemberId(null); setShowAddMember(true); }
-    function openEditMember(m: Member) { setMemberForm({ name: m.name, phone: m.phone, email: m.email, status: m.status, dateJoined: m.dateJoined }); setEditMemberId(m.id); setShowAddMember(true); }
-    function saveMember() {
-        if (!memberForm.name || !memberForm.dateJoined) return;
-        if (editMemberId !== null) {
-            setMembers(prev => prev.map(m => m.id === editMemberId ? { ...m, ...memberForm } : m));
-        } else {
-            setMembers(prev => [...prev, { id: nextId.current++, ...memberForm }]);
+    const loadAdminContext = async () => {
+        setLoading(true);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        setUserId(user.id);
+
+        const { data: profile } = await supabase.from('profiles').select('sacco_id').eq('id', user.id).single();
+        if (profile) {
+            setSaccoId(profile.sacco_id);
+            const { data: saccoData } = await supabase.from('saccos').select('name').eq('id', profile.sacco_id).single();
+            if (saccoData) setSaccoName(saccoData.name);
+            fetchSaccoData(profile.sacco_id);
         }
-        setShowAddMember(false);
-    }
-    function deleteMember(id: number) { setMembers(prev => prev.filter(m => m.id !== id)); }
+    };
+
+    const fetchSaccoData = async (orgId: string) => {
+        // Fetch Members
+        const { data: mems } = await supabase.from('profiles').select('*').eq('sacco_id', orgId).eq('role', 'member');
+        if (mems) {
+            setMembers(mems.map((m: any) => ({
+                id: m.id,
+                name: m.full_name,
+                phone: m.phone || '—',
+                email: m.email || '—',
+                status: m.status,
+                dateJoined: m.date_joined
+            })));
+        }
+
+        // Fetch Transactions with linked member names
+        const { data: txns } = await supabase.from('transactions')
+            .select('*, profiles!transactions_member_id_fkey(full_name)')
+            .eq('sacco_id', orgId).order('transaction_date', { ascending: false });
+        if (txns) {
+            setTransactions(txns.map((t: any) => ({
+                id: t.id,
+                memberName: t.profiles?.full_name || 'Unknown',
+                type: t.type,
+                amount: t.amount,
+                date: t.transaction_date,
+                note: t.note
+            })));
+        }
+
+        // Fetch Loans
+        const { data: lns } = await supabase.from('loans')
+            .select('*, profiles!loans_member_id_fkey(full_name)')
+            .eq('sacco_id', orgId).order('applied_on', { ascending: false });
+        if (lns) {
+            setLoans(lns.map((l: any) => ({
+                id: l.id,
+                memberName: l.profiles?.full_name || 'Unknown',
+                memberId: l.member_id,
+                amount: l.amount,
+                purpose: l.purpose,
+                status: l.status,
+                date: l.applied_on,
+                repaymentDate: l.repayment_date
+            })));
+        }
+
+        // Fetch Audit Logs
+        const { data: audits } = await supabase.from('audit_logs')
+            .select('*, profiles!audit_logs_actor_id_fkey(full_name)')
+            .eq('sacco_id', orgId).order('created_at', { ascending: false });
+        if (audits) {
+            setAuditLogs(audits.map((a: any) => ({
+                id: a.id,
+                action: a.action,
+                user: a.profiles?.full_name || 'System',
+                date: new Date(a.created_at).toLocaleString(),
+                details: a.details
+            })));
+        }
+
+        // Fetch Total Savings via View
+        const { data: stats } = await supabase.from('sacco_dashboard_stats').select('total_savings').eq('sacco_id', orgId).single();
+        if (stats) setTotalSavings(stats.total_savings || 0);
+
+        setLoading(false);
+    };
 
     // ─── Transaction handlers ──────────────────────────────────
-    function saveTxn() {
-        if (!txnForm.memberId || !txnForm.amount) return;
-        const member = members.find(m => m.id === Number(txnForm.memberId));
-        setTransactions(prev => [...prev, {
-            id: nextId.current++,
-            memberName: member?.name ?? 'Unknown',
+    async function saveTxn() {
+        if (!txnForm.memberId || !txnForm.amount || !saccoId) return;
+
+        const { error } = await supabase.from('transactions').insert([{
+            sacco_id: saccoId,
+            member_id: txnForm.memberId,
             type: txnForm.type,
             amount: Number(txnForm.amount),
-            date: new Date().toISOString().split('T')[0],
             note: txnForm.note,
+            created_by: userId
         }]);
-        setTxnForm({ ...EMPTY_TXN });
+
+        if (error) {
+            alert('Failed to save transaction: ' + error.message);
+            return;
+        }
+
+        setTxnForm({ memberId: '', type: 'Deposit', amount: '', note: '' });
         setShowAddTxn(false);
+        if (saccoId) fetchSaccoData(saccoId);
     }
 
     // ─── Loan handlers ─────────────────────────────────────────
-    function updateLoanStatus(id: number, status: Loan['status']) {
-        setLoans(prev => prev.map(l => l.id === id ? { ...l, status } : l));
+    async function updateLoanStatus(id: string, status: Loan['status']) {
+        if (!saccoId) return;
+        const { error } = await supabase.from('loans').update({
+            status: status,
+            reviewed_by: userId,
+            reviewed_at: new Date().toISOString()
+        }).eq('id', id);
+
+        if (error) {
+            alert("Error updating loan: " + error.message);
+        } else {
+            fetchSaccoData(saccoId);
+        }
     }
 
     // ─── Notification handler ──────────────────────────────────
-    function sendNotif() {
-        if (!notifTitle || !notifBody) return;
+    async function sendNotif() {
+        if (!notifTitle || !notifBody || !saccoId) return;
+
+        setLoading(true);
+        const { error } = await supabase.from('reminders').insert([{
+            sacco_id: saccoId,
+            title: notifTitle,
+            message: notifBody,
+            sent_by: userId
+        }]);
+        setLoading(false);
+
+        if (error) {
+            alert('Failed to send notification: ' + error.message);
+            return;
+        }
+
         setNotifSent(true);
         setTimeout(() => { setNotifSent(false); setNotifTitle(''); setNotifBody(''); setShowNotif(false); }, 2000);
     }
+
+    const handleLogoutClick = async () => {
+        await supabase.auth.signOut();
+        onLogout();
+    };
 
     // ─── Filters ────────────────────────────────────────────────
     const filteredMembers = members.filter(m =>
@@ -117,8 +249,9 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
 
     const filteredAudit = auditLogs.filter(a => {
         if (auditAction && !a.action.toLowerCase().includes(auditAction.toLowerCase())) return false;
-        if (auditDateFrom && a.date < auditDateFrom) return false;
-        if (auditDateTo && a.date > auditDateTo) return false;
+        // Basic date comparison (might need adjustment depending on specific locale format)
+        if (auditDateFrom && a.date.split(',')[0] < auditDateFrom) return false;
+        if (auditDateTo && a.date.split(',')[0] > auditDateTo) return false;
         return true;
     });
 
@@ -132,6 +265,8 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
     ];
 
     const renderContent = () => {
+        if (loading && members.length === 0) return <div>Loading SECURE payload...</div>;
+
         switch (activeTab) {
             case 'dashboard':
                 return (
@@ -144,7 +279,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                             </div>
                             <div className="metric-card" style={{ cursor: 'pointer' }} onClick={() => setActiveTab('transactions')}>
                                 <div className="metric-label">Total Savings <ArrowRightLeft size={20} color="#718096" /></div>
-                                <div className="metric-value">UGX {transactions.filter(t => t.type === 'Deposit').reduce((s, t) => s + t.amount, 0).toLocaleString()}</div>
+                                <div className="metric-value">UGX {totalSavings.toLocaleString()}</div>
                                 <span className="action-link" style={{ fontSize: '0.85rem', marginTop: '12px', display: 'inline-block' }}>View Transactions →</span>
                             </div>
                             <div className="metric-card" style={{ cursor: 'pointer' }} onClick={() => setActiveTab('loans')}>
@@ -155,7 +290,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                         </div>
                         <div className="dash-section-header"><h2>Quick Actions</h2></div>
                         <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                            <button className="btn-dark" onClick={() => { setActiveTab('members'); openAddMember(); }}><Plus size={18} /> Add New Member</button>
+                            <button className="btn-dark" onClick={() => { setActiveTab('members'); }}><Plus size={18} /> View Members</button>
                             <button className="btn-dark" onClick={() => { setActiveTab('transactions'); setShowAddTxn(true); }}><Plus size={18} /> Record Transaction</button>
                             <button className="btn-dark" onClick={() => setActiveTab('loans')}><FileText size={18} /> Review Loan Apps</button>
                         </div>
@@ -167,7 +302,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                     <>
                         <div className="dash-section-header">
                             <h2>Members Directory</h2>
-                            <button className="btn-dark" onClick={openAddMember}><Plus size={18} /> Add Member</button>
+                            <span style={{ fontSize: '0.9rem', color: '#718096' }}>Members register via the Sacco Code on the login page.</span>
                         </div>
                         <div className="filters-row">
                             <div className="search-bar">
@@ -180,7 +315,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                 <div className="dash-empty-state"><Users size={48} strokeWidth={1.5} /><p>No members found.</p></div>
                             ) : (
                                 <table className="dash-table">
-                                    <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th><th>Date Joined</th><th>Actions</th></tr></thead>
+                                    <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th><th>Date Joined</th></tr></thead>
                                     <tbody>
                                         {filteredMembers.map(m => (
                                             <tr key={m.id}>
@@ -189,10 +324,6 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                                 <td>{m.email}</td>
                                                 <td><span style={{ padding: '4px 10px', borderRadius: '999px', fontSize: '0.8rem', background: m.status === 'Active' ? '#e6f4ea' : '#fce8e8', color: m.status === 'Active' ? '#2d7a47' : '#c53030' }}>{m.status}</span></td>
                                                 <td>{m.dateJoined}</td>
-                                                <td style={{ display: 'flex', gap: '8px' }}>
-                                                    <button className="action-link" onClick={() => openEditMember(m)}>Edit</button>
-                                                    <button style={{ color: '#e53e3e', cursor: 'pointer', background: 'none', border: 'none', fontWeight: 600 }} onClick={() => deleteMember(m.id)}>Remove</button>
-                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -277,30 +408,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
 
             case 'reports':
                 return (
-                    <>
-                        <div className="dash-section-header"><h2>Export Reports</h2></div>
-                        <div style={{ background: '#fff', border: '1px solid #e3e8ee', borderRadius: '12px', padding: '24px', maxWidth: '560px' }}>
-                            <div style={{ marginBottom: '20px' }}>
-                                <label className="label-field">Report Type</label>
-                                <select className="input-field" value={reportType} onChange={e => setReportType(e.target.value)}>
-                                    <option value="members">Members</option>
-                                    <option value="transactions">Transactions</option>
-                                    <option value="loans">Loans</option>
-                                </select>
-                            </div>
-                            <div className="form-grid" style={{ marginBottom: '24px' }}>
-                                <div>
-                                    <label className="label-field">From</label>
-                                    <input type="date" className="input-field" value={reportDateFrom} onChange={e => setReportDateFrom(e.target.value)} />
-                                </div>
-                                <div>
-                                    <label className="label-field">To</label>
-                                    <input type="date" className="input-field" value={reportDateTo} onChange={e => setReportDateTo(e.target.value)} />
-                                </div>
-                            </div>
-                            <button className="btn-dark" onClick={() => alert(`Exporting ${reportType} report${reportDateFrom ? ` from ${reportDateFrom}` : ''}${reportDateTo ? ` to ${reportDateTo}` : ''}…`)}><FileText size={18} /> Export {reportType.charAt(0).toUpperCase() + reportType.slice(1)} (CSV)</button>
-                        </div>
-                    </>
+                    <div className="dash-empty-state"><FileText size={48} strokeWidth={1.5} /><p>Reporting module available via Backend Exports.</p></div>
                 );
 
             case 'audit':
@@ -312,19 +420,11 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                             <select className="input-field" style={{ width: '180px' }} value={auditAction} onChange={e => setAuditAction(e.target.value)}>
                                 <option value="">All Actions</option>
                                 <option value="Login">Login</option>
-                                <option value="Logout">Logout</option>
-                                <option value="Member Created">Member Created</option>
-                                <option value="Member Updated">Member Updated</option>
-                                <option value="Member Deleted">Member Deleted</option>
+                                <option value="Member Self-Registered">Member Self-Registered</option>
                                 <option value="Transaction Recorded">Transaction Recorded</option>
-                                <option value="Loan Approved">Loan Approved</option>
-                                <option value="Loan Rejected">Loan Rejected</option>
-                                <option value="Notification Sent">Notification Sent</option>
+                                <option value="Loan Requested">Loan Requested</option>
+                                <option value="Loan Status Updated">Loan Status Updated</option>
                             </select>
-                            <input type="date" className="input-field" style={{ width: 'auto' }} value={auditDateFrom} onChange={e => setAuditDateFrom(e.target.value)} />
-                            <span style={{ color: '#718096' }}>to</span>
-                            <input type="date" className="input-field" style={{ width: 'auto' }} value={auditDateTo} onChange={e => setAuditDateTo(e.target.value)} />
-                            {(auditAction || auditDateFrom || auditDateTo) && <button className="action-link" onClick={() => { setAuditAction(''); setAuditDateFrom(''); setAuditDateTo(''); }}>Clear</button>}
                         </div>
                         <div className="dash-table-wrapper">
                             {filteredAudit.length === 0 ? (
@@ -360,7 +460,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                     ))}
                 </div>
                 <div style={{ padding: '16px', borderTop: '1px solid #e3e8ee' }}>
-                    <button className="nav-item nav-logout" style={{ width: '100%' }} onClick={onLogout}><LogOut size={20} /> Logout</button>
+                    <button className="nav-item nav-logout" style={{ width: '100%', cursor: 'pointer', background: 'none', border: 'none' }} onClick={handleLogoutClick}><LogOut size={20} /> Logout</button>
                 </div>
             </div>
 
@@ -370,46 +470,14 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                         {!sidebarOpen && <button className="btn-icon" style={{ flexShrink: 0 }} onClick={() => setSidebarOpen(true)}><Menu size={18} /></button>}
                     </div>
                     <div className="dash-header-center">
-                        <span className="dash-header-title">{saccoName}</span>
+                        <span className="dash-header-title">{saccoName} Admin</span>
                     </div>
                     <div className="dash-header-actions">
-                        <button className="btn-icon" title="Send Notification" onClick={() => setShowNotif(true)}><Bell size={18} /></button>
+                        <button className="btn-icon" title="Send Global Notification" onClick={() => setShowNotif(true)}><Bell size={18} /></button>
                     </div>
                 </div>
                 <div className="dash-content">{renderContent()}</div>
             </div>
-
-            {/* Add Member Modal */}
-            {showAddMember && (
-                <div className="modal-backdrop" onClick={() => setShowAddMember(false)}>
-                    <div className="modal-box" onClick={e => e.stopPropagation()}>
-                        <div className="modal-header">
-                            <h3>{editMemberId !== null ? 'Edit Member' : 'Add New Member'}</h3>
-                            <button className="btn-icon" onClick={() => setShowAddMember(false)}><X size={18} /></button>
-                        </div>
-                        <div className="form-grid" style={{ gap: '16px' }}>
-                            <div><label className="label-field">Full Name *</label><input className="input-field" placeholder="Jane Doe" value={memberForm.name} onChange={e => setMemberForm(f => ({ ...f, name: e.target.value }))} /></div>
-                            <div><label className="label-field">Phone</label><input className="input-field" placeholder="+256…" value={memberForm.phone} onChange={e => setMemberForm(f => ({ ...f, phone: e.target.value }))} /></div>
-                            <div><label className="label-field">Email</label><input type="email" className="input-field" placeholder="jane@example.com" value={memberForm.email} onChange={e => setMemberForm(f => ({ ...f, email: e.target.value }))} /></div>
-                            <div>
-                                <label className="label-field">Status</label>
-                                <select className="input-field" value={memberForm.status} onChange={e => setMemberForm(f => ({ ...f, status: e.target.value as 'Active' | 'Inactive' }))}>
-                                    <option value="Active">Active</option>
-                                    <option value="Inactive">Inactive</option>
-                                </select>
-                            </div>
-                            <div style={{ gridColumn: '1 / -1' }}>
-                                <label className="label-field">Date Joined *</label>
-                                <input type="date" className="input-field" value={memberForm.dateJoined} onChange={e => setMemberForm(f => ({ ...f, dateJoined: e.target.value }))} />
-                            </div>
-                        </div>
-                        <div className="modal-footer">
-                            <button className="btn-outline-cancel" onClick={() => setShowAddMember(false)}>Cancel</button>
-                            <button className="btn-dark" onClick={saveMember}>{editMemberId !== null ? 'Save Changes' : 'Add Member'}</button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Add Transaction Modal */}
             {showAddTxn && (
@@ -426,14 +494,13 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                     <option value="">Select member…</option>
                                     {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                                 </select>
-                                {members.length === 0 && <p style={{ color: '#718096', fontSize: '0.8rem', marginTop: '6px' }}>Add a member first before recording a transaction.</p>}
+                                {members.length === 0 && <p style={{ color: '#718096', fontSize: '0.8rem', marginTop: '6px' }}>Members must register via Sacco Code first.</p>}
                             </div>
                             <div>
                                 <label className="label-field">Transaction Type</label>
                                 <select className="input-field" value={txnForm.type} onChange={e => setTxnForm(f => ({ ...f, type: e.target.value as Transaction['type'] }))}>
                                     <option value="Deposit">Deposit</option>
                                     <option value="Withdrawal">Withdrawal</option>
-                                    <option value="Loan">Loan</option>
                                 </select>
                             </div>
                             <div>
@@ -441,7 +508,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                 <input type="number" className="input-field" placeholder="0" value={txnForm.amount} onChange={e => setTxnForm(f => ({ ...f, amount: e.target.value }))} />
                             </div>
                             <div style={{ gridColumn: '1 / -1' }}>
-                                <label className="label-field">Note</label>
+                                <label className="label-field">Note (Optional)</label>
                                 <input className="input-field" placeholder="Optional note…" value={txnForm.note} onChange={e => setTxnForm(f => ({ ...f, note: e.target.value }))} />
                             </div>
                         </div>
@@ -473,7 +540,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                 </div>
                                 <div className="modal-footer">
                                     <button className="btn-outline-cancel" onClick={() => setShowNotif(false)}>Cancel</button>
-                                    <button className="btn-dark" onClick={sendNotif}><Bell size={16} /> Send to All Members</button>
+                                    <button className="btn-dark" onClick={sendNotif} disabled={loading}><Bell size={16} /> Send to All Members</button>
                                 </div>
                             </>
                         )}

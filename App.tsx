@@ -1,5 +1,6 @@
 import './index.css';
 import { useState, useEffect } from 'react';
+import { supabase } from './supabase';
 import Login from './Login';
 import AdminDashboard from './AdminDashboard';
 import SaccoAdminDashboard from './SaccoAdminDashboard';
@@ -139,15 +140,80 @@ function AnimatedHeadline() {
 }
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState<'landing' | 'login' | 'superadmin' | 'saccoadmin' | 'member'>('landing');
+  const [currentPage, setCurrentPage] = useState<'loading' | 'landing' | 'login' | 'superadmin' | 'saccoadmin' | 'member'>('loading');
 
-  if (currentPage === 'login') {
-    return <Login onBack={() => setCurrentPage('landing')} onLogin={(role) => setCurrentPage(role as any)} />;
+  // On mount, check if there is an existing Supabase session
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (session) {
+        // Fetch user profile to determine role
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .single();
+
+        if (profile) {
+          setCurrentPage(profile.role as any);
+        } else {
+          setCurrentPage('landing');
+        }
+      } else {
+        setCurrentPage('landing');
+      }
+    };
+
+    checkSession();
+
+    // Listen for auth state changes (login/logout from other tabs, etc.)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        setCurrentPage('landing');
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogin = (role: string) => {
+    setCurrentPage(role as any);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setCurrentPage('landing');
+  };
+
+  // Loading state while checking session
+  if (currentPage === 'loading') {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        background: '#0b0f1a',
+        color: '#fff',
+        fontFamily: 'Space Grotesk, sans-serif',
+        fontSize: '1.2rem'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '12px' }}>SaccoFlow</div>
+          <p style={{ color: '#a0aec0' }}>Verifying session...</p>
+        </div>
+      </div>
+    );
   }
 
-  if (currentPage === 'superadmin') return <AdminDashboard onLogout={() => setCurrentPage('landing')} />;
-  if (currentPage === 'saccoadmin') return <SaccoAdminDashboard onLogout={() => setCurrentPage('landing')} />;
-  if (currentPage === 'member') return <MemberDashboard onLogout={() => setCurrentPage('landing')} />;
+  if (currentPage === 'login') {
+    return <Login onBack={() => setCurrentPage('landing')} onLogin={handleLogin} />;
+  }
+
+  if (currentPage === 'superadmin') return <AdminDashboard onLogout={handleLogout} />;
+  if (currentPage === 'saccoadmin') return <SaccoAdminDashboard onLogout={handleLogout} />;
+  if (currentPage === 'member') return <MemberDashboard onLogout={handleLogout} />;
 
   return (
     <div className="page">
