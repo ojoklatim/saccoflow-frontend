@@ -9,6 +9,14 @@
     text-align: left;
 }
 
+/* Sacco Admin Yellow Theme */
+.sacco-admin-theme {
+    --blue-700: #ca8a04; /* yellow-600 */
+    --blue-800: #a16207; /* yellow-700 */
+    --blue-600: #eab308; /* yellow-500 */
+    --blue-500: #facc15; /* yellow-400 */
+}
+
 .dash-sidebar {
     width: 260px;
     background: #ffffff;

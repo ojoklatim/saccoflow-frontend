@@ -42,7 +42,7 @@ export default function Login({ onBack, onLogin }: LoginProps) {
             } else {
                 // Sacco Code Registration logic (Option B)
                 // This payload triggers the handle_new_user() SQL trigger on the backend
-                const { data, error } = await supabase.auth.signUp({
+                const { error } = await supabase.auth.signUp({
                     email,
                     password,
                     options: {

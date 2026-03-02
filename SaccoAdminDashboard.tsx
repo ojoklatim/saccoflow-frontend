@@ -425,6 +425,11 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                 <option value="Loan Requested">Loan Requested</option>
                                 <option value="Loan Status Updated">Loan Status Updated</option>
                             </select>
+                            <span style={{ fontWeight: 600, color: '#4a5568', fontSize: '0.9rem', marginLeft: '12px' }}>Date range:</span>
+                            <input type="date" className="input-field" style={{ width: 'auto' }} value={auditDateFrom} onChange={e => setAuditDateFrom(e.target.value)} />
+                            <span style={{ color: '#718096' }}>to</span>
+                            <input type="date" className="input-field" style={{ width: 'auto' }} value={auditDateTo} onChange={e => setAuditDateTo(e.target.value)} />
+                            {(auditDateFrom || auditDateTo || auditAction) && <button className="action-link" onClick={() => { setAuditDateFrom(''); setAuditDateTo(''); setAuditAction(''); }}>Clear</button>}
                         </div>
                         <div className="dash-table-wrapper">
                             {filteredAudit.length === 0 ? (
@@ -444,7 +449,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
     };
 
     return (
-        <div className="dash-layout">
+        <div className="dash-layout sacco-admin-theme">
             {sidebarOpen && <div className="sidebar-overlay active" onClick={() => setSidebarOpen(false)} />}
             <div className={`dash-sidebar ${!sidebarOpen ? 'dash-sidebar-closed' : ''}`}>
                 <div className="dash-logo-box">
