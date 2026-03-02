@@ -1,6 +1,6 @@
 import './index.css';
 import { useState, useEffect } from 'react';
-import { supabase } from './supabase';
+import { supabase, isSupabaseConfigured } from './supabase';
 import Login from './Login';
 import AdminDashboard from './AdminDashboard';
 import SaccoAdminDashboard from './SaccoAdminDashboard';
@@ -140,20 +140,18 @@ function AnimatedHeadline() {
 }
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState<'loading' | 'landing' | 'login' | 'superadmin' | 'saccoadmin' | 'member'>('loading');
+  // Start on landing immediately — never show a blank screen
+  const [currentPage, setCurrentPage] = useState<'landing' | 'login' | 'superadmin' | 'saccoadmin' | 'member'>('landing');
 
-  // On mount, check if there is an existing Supabase session
+  // On mount, check if there is an existing Supabase session (only if configured)
   useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
     const checkSession = async () => {
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
+        if (error || !session) return; // Stay on landing
 
-        if (error || !session) {
-          setCurrentPage('landing');
-          return;
-        }
-
-        // Fetch user profile to determine role
         const { data: profile } = await supabase
           .from('profiles')
           .select('role')
@@ -162,18 +160,14 @@ export default function App() {
 
         if (profile) {
           setCurrentPage(profile.role as any);
-        } else {
-          setCurrentPage('landing');
         }
       } catch {
-        // If Supabase is not configured or unreachable, go to landing
-        setCurrentPage('landing');
+        // Stay on landing
       }
     };
 
     checkSession();
 
-    // Listen for auth state changes (login/logout from other tabs, etc.)
     try {
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
         if (!session) {
@@ -182,7 +176,7 @@ export default function App() {
       });
       return () => subscription.unsubscribe();
     } catch {
-      // Supabase not configured, ignore listener
+      // Ignore
     }
   }, []);
 
@@ -191,30 +185,9 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    try { await supabase.auth.signOut(); } catch { /* ignore */ }
     setCurrentPage('landing');
   };
-
-  // Loading state while checking session
-  if (currentPage === 'loading') {
-    return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        background: '#0b0f1a',
-        color: '#fff',
-        fontFamily: 'Space Grotesk, sans-serif',
-        fontSize: '1.2rem'
-      }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '12px' }}>SaccoFlow</div>
-          <p style={{ color: '#a0aec0' }}>Verifying session...</p>
-        </div>
-      </div>
-    );
-  }
 
   if (currentPage === 'login') {
     return <Login onBack={() => setCurrentPage('landing')} onLogin={handleLogin} />;
