@@ -5,6 +5,7 @@ import Login from './Login';
 import AdminDashboard from './AdminDashboard';
 import SaccoAdminDashboard from './SaccoAdminDashboard';
 import MemberDashboard from './MemberDashboard';
+import ResetPassword from './ResetPassword';
 
 const features = [
   {
@@ -141,11 +142,17 @@ function AnimatedHeadline() {
 
 export default function App() {
   // Start on landing immediately — never show a blank screen
-  const [currentPage, setCurrentPage] = useState<'landing' | 'login' | 'superadmin' | 'saccoadmin' | 'member'>('landing');
+  const [currentPage, setCurrentPage] = useState<'landing' | 'login' | 'superadmin' | 'saccoadmin' | 'member' | 'reset'>('landing');
 
   // On mount, check if there is an existing Supabase session (only if configured)
   useEffect(() => {
     if (!isSupabaseConfigured) return;
+
+    // If the reset link redirected here (we use #/reset-password), show reset page
+    if (window.location && window.location.hash && window.location.hash.includes('reset-password')) {
+      setCurrentPage('reset');
+      return;
+    }
 
     const checkSession = async () => {
       try {
@@ -192,6 +199,8 @@ export default function App() {
   if (currentPage === 'login') {
     return <Login onBack={() => setCurrentPage('landing')} onLogin={handleLogin} />;
   }
+
+  if (currentPage === 'reset') return <ResetPassword />;
 
   if (currentPage === 'superadmin') return <AdminDashboard onLogout={handleLogout} />;
   if (currentPage === 'saccoadmin') return <SaccoAdminDashboard onLogout={handleLogout} />;
