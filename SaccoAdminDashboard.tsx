@@ -77,7 +77,10 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
     // Edit member modal state
     const [showEditMemberModal, setShowEditMemberModal] = useState(false);
     const [editMember, setEditMember] = useState<any | null>(null);
+    const [editMemberName, setEditMemberName] = useState('');
     const [editMemberPhone, setEditMemberPhone] = useState('');
+    const [editMemberEmail, setEditMemberEmail] = useState('');
+    const [editMemberStatus, setEditMemberStatus] = useState<'Active' | 'Inactive'>('Active');
 
     // Filter state
     const [memberSearch, setMemberSearch] = useState('');
@@ -356,7 +359,14 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                                 <td><span style={{ padding: '4px 10px', borderRadius: '999px', fontSize: '0.8rem', background: m.status === 'Active' ? '#e6f4ea' : '#fce8e8', color: m.status === 'Active' ? '#2d7a47' : '#c53030' }}>{m.status}</span></td>
                                                 <td>{m.dateJoined}</td>
                                                     <td>
-                                                        <button className="action-link" onClick={() => { setEditMember(m); setEditMemberPhone(m.phone === '—' ? '' : m.phone); setShowEditMemberModal(true); }}>Edit</button>
+                                                        <button className="action-link" onClick={() => { 
+                                                            setEditMember(m); 
+                                                            setEditMemberName(m.name);
+                                                            setEditMemberPhone(m.phone === '—' ? '' : m.phone); 
+                                                            setEditMemberEmail(m.email === '—' ? '' : m.email);
+                                                            setEditMemberStatus(m.status);
+                                                            setShowEditMemberModal(true); 
+                                                        }}>Edit</button>
                                                     </td>
                                             </tr>
                                         ))}
@@ -671,18 +681,34 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                         <div style={{ marginTop: 12 }}>
                             <div style={{ marginBottom: 12 }}>
                                 <label className="label-field">Full Name</label>
-                                <div style={{ padding: 8 }}>{editMember.name}</div>
+                                <input className="input-field" value={editMemberName} onChange={e => setEditMemberName(e.target.value)} placeholder="Enter full name" />
+                            </div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label className="label-field">Email</label>
+                                <input className="input-field" type="email" value={editMemberEmail} onChange={e => setEditMemberEmail(e.target.value)} placeholder="Enter email" />
                             </div>
                             <div style={{ marginBottom: 12 }}>
                                 <label className="label-field">Phone</label>
                                 <input className="input-field" value={editMemberPhone} onChange={e => setEditMemberPhone(e.target.value)} placeholder="Enter phone number" />
+                            </div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label className="label-field">Status</label>
+                                <select className="input-field" value={editMemberStatus} onChange={e => setEditMemberStatus(e.target.value as 'Active' | 'Inactive')}>
+                                    <option value="Active">Active</option>
+                                    <option value="Inactive">Inactive</option>
+                                </select>
                             </div>
                             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                                 <button className="btn ghost" onClick={() => setShowEditMemberModal(false)}>Cancel</button>
                                 <button className="btn primary" onClick={async () => {
                                     if (!editMember) return;
                                     try {
-                                        const { error } = await supabase.from('profiles').update({ phone: editMemberPhone }).eq('id', editMember.id);
+                                        const { error } = await supabase.from('profiles').update({ 
+                                            full_name: editMemberName,
+                                            email: editMemberEmail,
+                                            phone: editMemberPhone,
+                                            status: editMemberStatus
+                                        }).eq('id', editMember.id);
                                         if (error) throw error;
                                         // refresh data
                                         if (saccoId) await fetchSaccoData(saccoId);
