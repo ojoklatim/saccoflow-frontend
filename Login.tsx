@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase } from './supabase';
+import { supabase, isSupabaseConfigured } from './supabase';
 import './index.css';
 
 interface LoginProps {
@@ -20,6 +20,12 @@ export default function Login({ onBack, onLogin }: LoginProps) {
         e.preventDefault();
         setLoading(true);
         setErrorMsg('');
+
+        if (!isSupabaseConfigured) {
+            setErrorMsg('Supabase is not configured for this deployment. Please contact the site administrator.');
+            setLoading(false);
+            return;
+        }
 
         try {
             if (isLogin) {

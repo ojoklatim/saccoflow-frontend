@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://cm-xh19.github.io/saccoflow-frontend",
+  "homepage": "https://ojoklatim.github.io/saccoflow-frontend",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
