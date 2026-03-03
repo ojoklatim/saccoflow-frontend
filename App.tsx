@@ -199,6 +199,18 @@ export default function App() {
 
   return (
     <div className="page">
+      {!isSupabaseConfigured && (
+        <div style={{ 
+          background: '#fef2f2', 
+          color: '#991b1b', 
+          padding: '12px 20px', 
+          textAlign: 'center', 
+          fontSize: '0.9rem',
+          borderBottom: '1px solid #fee2e2'
+        }}>
+          ⚠️ <strong>Warning:</strong> Supabase is not configured. Check browser console for details.
+        </div>
+      )}
       <header className="nav">
         <div className="logo">SaccoFlow</div>
         <nav className="nav-links">
