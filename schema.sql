@@ -69,11 +69,12 @@ CREATE TABLE loans (
 );
 
 -- ==========================================
--- 5. Reminders Table (Global Sacco Notifications)
+-- 5. Reminders Table (Member-Specific Notifications)
 -- ==========================================
 CREATE TABLE reminders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     sacco_id UUID NOT NULL REFERENCES saccos(id) ON DELETE CASCADE,
+    member_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     message TEXT NOT NULL,
     sent_by UUID REFERENCES profiles(id),
@@ -178,9 +179,9 @@ BEGIN
         INSERT INTO audit_logs (sacco_id, action, actor_id, details)
         VALUES (v_sacco_id, 'Member Self-Registered', NEW.id, 'Self-registered using Sacco Code: ' || (NEW.raw_user_meta_data->>'sacco_code'));
         
-        -- Send a Welcome Reminder to the new member
-        INSERT INTO reminders (sacco_id, title, message, sent_by)
-        VALUES (v_sacco_id, 'Welcome to ' || (SELECT name FROM saccos WHERE id = v_sacco_id), 'We are glad to have you! Explore your dashboard.', NEW.id);
+        -- Send a Welcome Reminder to the new member (member-specific)
+        INSERT INTO reminders (sacco_id, member_id, title, message, sent_by)
+        VALUES (v_sacco_id, NEW.id, 'Welcome to ' || (SELECT name FROM saccos WHERE id = v_sacco_id), 'We are glad to have you! Explore your dashboard.', NEW.id);
     END IF;
 
     RETURN NEW;

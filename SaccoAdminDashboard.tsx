@@ -74,6 +74,11 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
 
     const [loading, setLoading] = useState(false);
 
+    // Edit member modal state
+    const [showEditMemberModal, setShowEditMemberModal] = useState(false);
+    const [editMember, setEditMember] = useState<any | null>(null);
+    const [editMemberPhone, setEditMemberPhone] = useState('');
+
     // Filter state
     const [memberSearch, setMemberSearch] = useState('');
     const [txnDateFrom, setTxnDateFrom] = useState('');
@@ -102,8 +107,8 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
     };
 
     const fetchSaccoData = async (orgId: string) => {
-        // Fetch Members
-        const { data: mems } = await supabase.from('profiles').select('*').eq('sacco_id', orgId).eq('role', 'member');
+        // Fetch Members with their savings balances
+        const { data: mems } = await supabase.from('profiles').select('*').eq('sacco_id', orgId).eq('role', 'member').order('date_joined', { ascending: false });
         if (mems) {
             setMembers(mems.map((m: any) => ({
                 id: m.id,
@@ -111,8 +116,13 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                 phone: m.phone || '—',
                 email: m.email || '—',
                 status: m.status,
-                dateJoined: m.date_joined
-            })));
+                dateJoined: m.date_joined,
+                savingsBalance: 0
+            })));             // Fetch balance for each member
+            for (const member of mems) {
+                const { data: balance } = await supabase.from('member_dashboard_stats').select('savings_balance').eq('member_id', member.id).single();
+                setMembers((prev: any) => prev.map((m: any) => m.id === member.id ? { ...m, savingsBalance: balance?.savings_balance || 0 } : m));
+            }
         }
 
         // Fetch Transactions with linked member names
@@ -120,7 +130,8 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
             .select('*, profiles!transactions_member_id_fkey(full_name)')
             .eq('sacco_id', orgId).order('transaction_date', { ascending: false });
         if (txns) {
-            setTransactions(txns.map((t: any) => ({
+            const sortedTxns = txns.sort((a: any, b: any) => new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime());
+            setTransactions(sortedTxns.map((t: any) => ({
                 id: t.id,
                 memberName: t.profiles?.full_name || 'Unknown',
                 type: t.type,
@@ -135,7 +146,8 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
             .select('*, profiles!loans_member_id_fkey(full_name)')
             .eq('sacco_id', orgId).order('applied_on', { ascending: false });
         if (lns) {
-            setLoans(lns.map((l: any) => ({
+            const sortedLoans = lns.sort((a: any, b: any) => new Date(b.applied_on).getTime() - new Date(a.applied_on).getTime());
+            setLoans(sortedLoans.map((l: any) => ({
                 id: l.id,
                 memberName: l.profiles?.full_name || 'Unknown',
                 memberId: l.member_id,
@@ -194,6 +206,11 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
     // ─── Loan handlers ─────────────────────────────────────────
     async function updateLoanStatus(id: string, status: Loan['status']) {
         if (!saccoId) return;
+        
+        // Get member_id from the loan
+        const { data: loanData } = await supabase.from('loans').select('member_id').eq('id', id).single();
+        const memberId = loanData?.member_id;
+
         const { error } = await supabase.from('loans').update({
             status: status,
             reviewed_by: userId,
@@ -203,6 +220,20 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
         if (error) {
             alert("Error updating loan: " + error.message);
         } else {
+            // Send member-specific notification about loan decision
+            if (memberId) {
+                const message = status === 'Approved' 
+                    ? 'Your loan application has been approved! You can now access your funds.' 
+                    : 'Your loan application has been rejected. Please contact the admin for more details.';
+                
+                await supabase.from('reminders').insert([{
+                    sacco_id: saccoId,
+                    member_id: memberId,
+                    title: `Loan ${status}`,
+                    message: message,
+                    sent_by: userId
+                }]);
+            }
             fetchSaccoData(saccoId);
         }
     }
@@ -239,21 +270,20 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
         m.name.toLowerCase().includes(memberSearch.toLowerCase()) ||
         m.phone.includes(memberSearch) ||
         m.email.toLowerCase().includes(memberSearch.toLowerCase())
-    );
+    ).sort((a, b) => new Date(b.dateJoined).getTime() - new Date(a.dateJoined).getTime());
 
     const filteredTxns = transactions.filter(t => {
         if (txnDateFrom && t.date < txnDateFrom) return false;
         if (txnDateTo && t.date > txnDateTo) return false;
         return true;
-    });
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     const filteredAudit = auditLogs.filter(a => {
         if (auditAction && !a.action.toLowerCase().includes(auditAction.toLowerCase())) return false;
-        // Basic date comparison (might need adjustment depending on specific locale format)
         if (auditDateFrom && a.date.split(',')[0] < auditDateFrom) return false;
         if (auditDateTo && a.date.split(',')[0] > auditDateTo) return false;
         return true;
-    });
+    }).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     const navItems = [
         { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
@@ -315,15 +345,19 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                 <div className="dash-empty-state"><Users size={48} strokeWidth={1.5} /><p>No members found.</p></div>
                             ) : (
                                 <table className="dash-table">
-                                    <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Status</th><th>Date Joined</th></tr></thead>
+                                    <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Savings Balance (UGX)</th><th>Status</th><th>Date Joined</th></tr></thead>
                                     <tbody>
                                         {filteredMembers.map(m => (
                                             <tr key={m.id}>
                                                 <td>{m.name}</td>
                                                 <td>{m.phone}</td>
                                                 <td>{m.email}</td>
+                                                    <td>{(m as any).savingsBalance?.toLocaleString() || '0'}</td>
                                                 <td><span style={{ padding: '4px 10px', borderRadius: '999px', fontSize: '0.8rem', background: m.status === 'Active' ? '#e6f4ea' : '#fce8e8', color: m.status === 'Active' ? '#2d7a47' : '#c53030' }}>{m.status}</span></td>
                                                 <td>{m.dateJoined}</td>
+                                                    <td>
+                                                        <button className="action-link" onClick={() => { setEditMember(m); setEditMemberPhone(m.phone === '—' ? '' : m.phone); setShowEditMemberModal(true); }}>Edit</button>
+                                                    </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -408,7 +442,108 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
 
             case 'reports':
                 return (
-                    <div className="dash-empty-state"><FileText size={48} strokeWidth={1.5} /><p>Reporting module available via Backend Exports.</p></div>
+                    <>
+                        <div className="dash-section-header">
+                            <h2>Reports & Data Export</h2>
+                            <span style={{ fontSize: '0.9rem', color: '#718096' }}>Export comprehensive SACCO data for analysis and compliance.</span>
+                        </div>
+                        
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+                            <button 
+                                onClick={() => {
+                                    const csv = ['Full Name,Phone,Email,Status,Date Joined,Savings Balance', ...filteredMembers.map(m => `${m.name},${m.phone},${m.email},${m.status},${m.dateJoined},${(m as any).savingsBalance || 0}`)].join('\n');
+                                    const blob = new Blob([csv], { type: 'text/csv' });
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `${saccoName}_members_${new Date().toISOString().split('T')[0]}.csv`;
+                                    a.click();
+                                }}
+                                style={{ padding: '10px 16px', background: '#f7f9fc', border: '1px solid #e3e8ee', borderRadius: '6px', cursor: 'pointer', fontSize: '0.9rem', color: '#1a1f36', fontWeight: 500, transition: 'all 0.2s' }}
+                                onMouseEnter={(e) => { (e.target as any).style.background = '#e8f0fe'; (e.target as any).style.borderColor = '#2d54e6'; }}
+                                onMouseLeave={(e) => { (e.target as any).style.background = '#f7f9fc'; (e.target as any).style.borderColor = '#e3e8ee'; }}
+                            >
+                                ↓ Members
+                            </button>
+                            
+                            <button 
+                                onClick={() => {
+                                    const csv = ['Member,Type,Amount,Date,Note', ...filteredTxns.map(t => `${t.memberName},${t.type},${t.amount},${t.date},${t.note || 'N/A'}`)].join('\n');
+                                    const blob = new Blob([csv], { type: 'text/csv' });
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `${saccoName}_transactions_${new Date().toISOString().split('T')[0]}.csv`;
+                                    a.click();
+                                }}
+                                style={{ padding: '10px 16px', background: '#f7f9fc', border: '1px solid #e3e8ee', borderRadius: '6px', cursor: 'pointer', fontSize: '0.9rem', color: '#1a1f36', fontWeight: 500, transition: 'all 0.2s' }}
+                                onMouseEnter={(e) => { (e.target as any).style.background = '#e8f0fe'; (e.target as any).style.borderColor = '#2d54e6'; }}
+                                onMouseLeave={(e) => { (e.target as any).style.background = '#f7f9fc'; (e.target as any).style.borderColor = '#e3e8ee'; }}
+                            >
+                                ↓ Transactions
+                            </button>
+                            
+                            <button 
+                                onClick={() => {
+                                    const csv = ['Member,Amount,Purpose,Status,Applied On,Repayment Date', ...loans.map(l => `${l.memberName},${l.amount},${l.purpose},${l.status},${l.date},${l.repaymentDate}`)].join('\n');
+                                    const blob = new Blob([csv], { type: 'text/csv' });
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `${saccoName}_loans_${new Date().toISOString().split('T')[0]}.csv`;
+                                    a.click();
+                                }}
+                                style={{ padding: '10px 16px', background: '#f7f9fc', border: '1px solid #e3e8ee', borderRadius: '6px', cursor: 'pointer', fontSize: '0.9rem', color: '#1a1f36', fontWeight: 500, transition: 'all 0.2s' }}
+                                onMouseEnter={(e) => { (e.target as any).style.background = '#e8f0fe'; (e.target as any).style.borderColor = '#2d54e6'; }}
+                                onMouseLeave={(e) => { (e.target as any).style.background = '#f7f9fc'; (e.target as any).style.borderColor = '#e3e8ee'; }}
+                            >
+                                ↓ Loans
+                            </button>
+                            
+                            <button 
+                                onClick={() => {
+                                    const totalDeposits = transactions.filter((t: any) => t.type === 'Deposit').reduce((sum: number, t: any) => sum + t.amount, 0);
+                                    const totalWithdrawals = transactions.filter((t: any) => t.type === 'Withdrawal').reduce((sum: number, t: any) => sum + t.amount, 0);
+                                    const totalLoans = loans.reduce((sum: number, l: any) => sum + l.amount, 0);
+                                    const approvedLoans = loans.filter((l: any) => l.status === 'Approved').length;
+                                    const csv = ['Metric,Value', `Total Members,${members.length}`, `Total Deposits,${totalDeposits}`, `Total Withdrawals,${totalWithdrawals}`, `Total Loan Requests,${loans.length}`, `Approved Loans,${approvedLoans}`, `Total Loan Amount,${totalLoans}`].join('\n');
+                                    const blob = new Blob([csv], { type: 'text/csv' });
+                                    const url = window.URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `${saccoName}_summary_${new Date().toISOString().split('T')[0]}.csv`;
+                                    a.click();
+                                }}
+                                style={{ padding: '10px 16px', background: '#f7f9fc', border: '1px solid #e3e8ee', borderRadius: '6px', cursor: 'pointer', fontSize: '0.9rem', color: '#1a1f36', fontWeight: 500, transition: 'all 0.2s' }}
+                                onMouseEnter={(e) => { (e.target as any).style.background = '#e8f0fe'; (e.target as any).style.borderColor = '#2d54e6'; }}
+                                onMouseLeave={(e) => { (e.target as any).style.background = '#f7f9fc'; (e.target as any).style.borderColor = '#e3e8ee'; }}
+                            >
+                                ↓ Summary
+                            </button>
+                        </div>
+
+                        <div style={{ background: '#f7f9fc', padding: '24px', borderRadius: '12px', marginTop: '24px' }}>
+                            <h3 style={{ marginBottom: '16px', color: '#1a1f36' }}>SACCO Summary Statistics</h3>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                                <div style={{ background: '#fff', padding: '16px', borderRadius: '8px', borderLeft: '4px solid #2d54e6' }}>
+                                    <div style={{ fontSize: '0.85rem', color: '#718096', marginBottom: '8px' }}>Total Members</div>
+                                    <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#1a1f36' }}>{members.length}</div>
+                                </div>
+                                <div style={{ background: '#fff', padding: '16px', borderRadius: '8px', borderLeft: '4px solid #2d54e6' }}>
+                                    <div style={{ fontSize: '0.85rem', color: '#718096', marginBottom: '8px' }}>Total Loans</div>
+                                    <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#1a1f36' }}>{loans.length}</div>
+                                </div>
+                                <div style={{ background: '#fff', padding: '16px', borderRadius: '8px', borderLeft: '4px solid #2d54e6' }}>
+                                    <div style={{ fontSize: '0.85rem', color: '#718096', marginBottom: '8px' }}>Total Savings</div>
+                                    <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#1a1f36' }}>UGX {totalSavings.toLocaleString()}</div>
+                                </div>
+                                <div style={{ background: '#fff', padding: '16px', borderRadius: '8px', borderLeft: '4px solid #2d54e6' }}>
+                                    <div style={{ fontSize: '0.85rem', color: '#718096', marginBottom: '8px' }}>Total Transactions</div>
+                                    <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#1a1f36' }}>{transactions.length}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </>
                 );
 
             case 'audit':
@@ -520,6 +655,43 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                         <div className="modal-footer">
                             <button className="btn-outline-cancel" onClick={() => setShowAddTxn(false)}>Cancel</button>
                             <button className="btn-dark" onClick={saveTxn}>Save Transaction</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Member Modal */}
+            {showEditMemberModal && editMember && (
+                <div className="modal-backdrop" onClick={() => setShowEditMemberModal(false)}>
+                    <div className="modal-box" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3>Edit Member</h3>
+                            <button className="btn-icon" onClick={() => setShowEditMemberModal(false)}><X size={18} /></button>
+                        </div>
+                        <div style={{ marginTop: 12 }}>
+                            <div style={{ marginBottom: 12 }}>
+                                <label className="label-field">Full Name</label>
+                                <div style={{ padding: 8 }}>{editMember.name}</div>
+                            </div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label className="label-field">Phone</label>
+                                <input className="input-field" value={editMemberPhone} onChange={e => setEditMemberPhone(e.target.value)} placeholder="Enter phone number" />
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                                <button className="btn ghost" onClick={() => setShowEditMemberModal(false)}>Cancel</button>
+                                <button className="btn primary" onClick={async () => {
+                                    if (!editMember) return;
+                                    try {
+                                        const { error } = await supabase.from('profiles').update({ phone: editMemberPhone }).eq('id', editMember.id);
+                                        if (error) throw error;
+                                        // refresh data
+                                        if (saccoId) await fetchSaccoData(saccoId);
+                                        setShowEditMemberModal(false);
+                                    } catch (err: any) {
+                                        alert('Failed to save member: ' + (err?.message || String(err)));
+                                    }
+                                }}>Save</button>
+                            </div>
                         </div>
                     </div>
                 </div>

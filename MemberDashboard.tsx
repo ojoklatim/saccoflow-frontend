@@ -55,6 +55,9 @@ export default function MemberDashboard({ onLogout }: MemberDashboardProps) {
     const [loanForm, setLoanForm] = useState({ amount: '', purpose: '', repaymentDate: '' });
     const [loanSuccess, setLoanSuccess] = useState(false);
     const [loanLoading, setLoanLoading] = useState(false);
+    const [editPhoneMode, setEditPhoneMode] = useState(false);
+    const [phoneValue, setPhoneValue] = useState('');
+    const [phoneSaving, setPhoneSaving] = useState(false);
 
     // Filter state
     const [txnDateFrom, setTxnDateFrom] = useState('');
@@ -100,10 +103,11 @@ export default function MemberDashboard({ onLogout }: MemberDashboardProps) {
                 .order('applied_on', { ascending: false });
             if (loanData) setLoans(loanData as any);
 
-            // Fetch Reminders
+            // Fetch Reminders (broadcast + member-specific)
             const { data: remData } = await supabase.from('reminders')
                 .select('*')
                 .eq('sacco_id', profile.sacco_id)
+                .or(`member_id.is.null,member_id.eq.${user.id}`)
                 .order('created_at', { ascending: false });
             if (remData) setReminders(remData as any);
         }
@@ -145,11 +149,13 @@ export default function MemberDashboard({ onLogout }: MemberDashboardProps) {
         onLogout();
     };
 
-    const filteredTxns = transactions.filter(t => {
-        if (txnDateFrom && t.transaction_date < txnDateFrom) return false;
-        if (txnDateTo && t.transaction_date > txnDateTo) return false;
-        return true;
-    });
+    const filteredTxns = transactions
+        .filter(t => {
+            if (txnDateFrom && t.transaction_date < txnDateFrom) return false;
+            if (txnDateTo && t.transaction_date > txnDateTo) return false;
+            return true;
+        })
+        .sort((a, b) => new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime());
 
     const renderContent = () => {
         switch (activeTab) {
@@ -175,7 +181,78 @@ export default function MemberDashboard({ onLogout }: MemberDashboardProps) {
                         </div>
 
                         <div className="dash-section-header" style={{ marginTop: '24px' }}>
-                            <h2>Need financing?</h2>
+                            <h2>Account Information</h2>
+                        </div>
+                        <div className="metric-card" style={{ maxWidth: '600px' }}>
+                            <div style={{ marginBottom: '16px' }}>
+                                <label className="label-field">Name</label>
+                                <div style={{ padding: '12px', background: '#f7f9fc', borderRadius: '8px', color: '#1a1f36' }}>{userProfile?.full_name || 'Loading...'}</div>
+                            </div>
+                            <div style={{ marginBottom: '16px' }}>
+                                <label className="label-field">Phone Number</label>
+                                {editPhoneMode ? (
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <input 
+                                            type="tel" 
+                                            className="input-field" 
+                                            value={phoneValue} 
+                                            onChange={(e) => setPhoneValue(e.target.value)}
+                                            placeholder="Enter phone number"
+                                            style={{ flex: 1 }}
+                                            autoFocus
+                                        />
+                                        <button
+                                            className="btn primary"
+                                            onClick={async () => {
+                                                // delegate to helper to ensure auth + proper UX
+                                                if (phoneSaving) return;
+                                                setPhoneSaving(true);
+                                                try {
+                                                    // ensure we have the latest user id
+                                                    const { data: userData } = await supabase.auth.getUser();
+                                                    const authId = userData?.user?.id || userId;
+                                                    if (!authId) throw new Error('Unable to determine user id');
+
+                                                    const { error } = await supabase.from('profiles').update({ phone: phoneValue }).eq('id', authId);
+                                                    if (error) throw error;
+
+                                                    // Refresh local profile
+                                                    const { data: refreshed } = await supabase.from('profiles').select('*').eq('id', authId).single();
+                                                    if (refreshed) setUserProfile(refreshed as any);
+                                                    setEditPhoneMode(false);
+                                                    setPhoneValue('');
+                                                } catch (err: any) {
+                                                    alert('Failed to update phone: ' + (err?.message || String(err)));
+                                                } finally {
+                                                    setPhoneSaving(false);
+                                                }
+                                            }}
+                                            style={{ whiteSpace: 'nowrap', minWidth: '80px' }}
+                                            disabled={phoneSaving}
+                                        >
+                                            {phoneSaving ? 'Saving...' : 'Save'}
+                                        </button>
+                                        <button 
+                                            className="btn ghost" 
+                                            onClick={() => { setEditPhoneMode(false); setPhoneValue(''); }}
+                                            style={{ whiteSpace: 'nowrap', minWidth: '80px' }}
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: '#f7f9fc', borderRadius: '8px', color: '#1a1f36' }}>
+                                        <span>{userProfile?.phone || 'Not provided'}</span>
+                                        <button 
+                                            className="btn ghost" 
+                                            onClick={() => { setEditPhoneMode(true); setPhoneValue(userProfile?.phone || ''); }}
+                                            style={{ fontSize: '0.85rem' }}
+                                        >
+                                            Edit
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                         <button className="btn-dark" onClick={() => setActiveTab('loans')}>Request a Loan</button>
 
@@ -190,7 +267,7 @@ export default function MemberDashboard({ onLogout }: MemberDashboardProps) {
                                 <table className="dash-table">
                                     <thead><tr><th>Type</th><th>Amount (UGX)</th><th>Date</th><th>Note</th></tr></thead>
                                     <tbody>
-                                        {transactions.slice(0, 5).map(t => (
+                                        {[...transactions].sort((a, b) => new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime()).slice(0, 5).map(t => (
                                             <tr key={t.id}>
                                                 <td><span style={{ padding: '4px 10px', borderRadius: '999px', fontSize: '0.8rem', background: t.type === 'Deposit' ? '#e6f4ea' : '#fce8e8', color: t.type === 'Deposit' ? '#2d7a47' : '#c53030' }}>{t.type}</span></td>
                                                 <td>{t.amount.toLocaleString()}</td>
@@ -257,7 +334,7 @@ export default function MemberDashboard({ onLogout }: MemberDashboardProps) {
                                 <table className="dash-table">
                                     <thead><tr><th>Amount (UGX)</th><th>Applied On</th><th>Due Date</th><th>Status</th></tr></thead>
                                     <tbody>
-                                        {loans.map(l => (
+                                        {[...loans].sort((a, b) => new Date(b.applied_on).getTime() - new Date(a.applied_on).getTime()).map(l => (
                                             <tr key={l.id}>
                                                 <td>{l.amount.toLocaleString()}</td>
                                                 <td>{l.applied_on}</td>
