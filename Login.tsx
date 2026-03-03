@@ -46,8 +46,22 @@ export default function Login({ onBack, onLogin }: LoginProps) {
                     onLogin(profile?.role || 'member', data.session);
                 }
             } else {
-                // Sacco Code Registration logic (Option B)
-                // This payload triggers the handle_new_user() SQL trigger on the backend
+                // Check if this email is a Sacco admin email
+                let userRole = 'member';
+                let saccoId: string | null = null;
+
+                const { data: saccoData } = await supabase
+                    .from('saccos')
+                    .select('id')
+                    .eq('email', email)
+                    .single();
+
+                if (saccoData) {
+                    userRole = 'saccoadmin';
+                    saccoId = saccoData.id;
+                }
+
+                // Sign up with appropriate role
                 const { error } = await supabase.auth.signUp({
                     email,
                     password,
@@ -55,14 +69,19 @@ export default function Login({ onBack, onLogin }: LoginProps) {
                         data: {
                             full_name: fullName,
                             sacco_code: saccoCode || null,
-                            role: 'member' // Default role for self-registration
+                            role: userRole,
+                            sacco_id: saccoId // Include sacco_id if they're an admin
                         }
                     }
                 });
 
                 if (error) throw error;
 
-                alert('Registration successful! If you provided a valid Sacco Code, your account is now linked. You can sign in.');
+                const messageText = userRole === 'saccoadmin'
+                    ? 'Registration successful! You are now the admin for your Sacco.'
+                    : 'Registration successful! If you provided a valid Sacco Code, your account is now linked. You can sign in.';
+                
+                alert(messageText);
                 setIsLogin(true);
             }
         } catch (error: any) {
