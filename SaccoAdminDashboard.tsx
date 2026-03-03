@@ -698,25 +698,45 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                     <option value="Inactive">Inactive</option>
                                 </select>
                             </div>
-                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                                <button className="btn ghost" onClick={() => setShowEditMemberModal(false)}>Cancel</button>
-                                <button className="btn primary" onClick={async () => {
-                                    if (!editMember) return;
-                                    try {
-                                        const { error } = await supabase.from('profiles').update({ 
-                                            full_name: editMemberName,
-                                            email: editMemberEmail,
-                                            phone: editMemberPhone,
-                                            status: editMemberStatus
-                                        }).eq('id', editMember.id);
-                                        if (error) throw error;
-                                        // refresh data
-                                        if (saccoId) await fetchSaccoData(saccoId);
-                                        setShowEditMemberModal(false);
-                                    } catch (err: any) {
-                                        alert('Failed to save member: ' + (err?.message || String(err)));
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between' }}>
+                                <button className="btn outline" onClick={async () => {
+                                    if (!editMember || !editMember.email) {
+                                        alert('Cannot reset password: email not available');
+                                        return;
                                     }
-                                }}>Save</button>
+                                    const confirmReset = window.confirm(`Send password reset email to ${editMember.email}? They will receive a link to set a new password.`);
+                                    if (!confirmReset) return;
+                                    
+                                    try {
+                                        const { error } = await supabase.auth.resetPasswordForEmail(editMember.email, {
+                                            redirectTo: `${window.location.origin}/saccoflow-frontend/#/reset-password`
+                                        });
+                                        if (error) throw error;
+                                        alert('✅ Password reset email sent to ' + editMember.email);
+                                    } catch (err: any) {
+                                        alert('Failed to send reset email: ' + (err?.message || String(err)));
+                                    }
+                                }}>Reset Password</button>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button className="btn ghost" onClick={() => setShowEditMemberModal(false)}>Cancel</button>
+                                    <button className="btn primary" onClick={async () => {
+                                        if (!editMember) return;
+                                        try {
+                                            const { error } = await supabase.from('profiles').update({ 
+                                                full_name: editMemberName,
+                                                email: editMemberEmail,
+                                                phone: editMemberPhone,
+                                                status: editMemberStatus
+                                            }).eq('id', editMember.id);
+                                            if (error) throw error;
+                                            // refresh data
+                                            if (saccoId) await fetchSaccoData(saccoId);
+                                            setShowEditMemberModal(false);
+                                        } catch (err: any) {
+                                            alert('Failed to save member: ' + (err?.message || String(err)));
+                                        }
+                                    }}>Save</button>
+                                </div>
                             </div>
                         </div>
                     </div>
