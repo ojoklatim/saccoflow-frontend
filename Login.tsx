@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase, isSupabaseConfigured, formatSupabaseError } from './supabase';
+import { supabase, isSupabaseConfigured } from './supabase';
 import './index.css';
 
 interface LoginProps {
