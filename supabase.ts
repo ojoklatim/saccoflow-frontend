@@ -20,3 +20,28 @@ export const supabase = createClient(
     isSupabaseConfigured ? supabaseUrl : 'https://placeholder.supabase.co',
     isSupabaseConfigured ? supabaseKey : 'placeholder-key'
 );
+
+/**
+ * Formats Supabase/PostgREST error messages to be more user-friendly.
+ */
+export function formatSupabaseError(error: any): string {
+    if (!error) return 'An unknown error occurred';
+    
+    const message = error.message || String(error);
+    
+    // Replace "Cannot coerce the result to a single JSON object"
+    if (message.includes('Cannot coerce the result to a single JSON object')) {
+        return 'The requested record (e.g., your user profile) was not found. If you just registered, please wait a moment or contact your administrator.';
+    }
+    
+    // Replace common RLS or permission errors
+    if (message.includes('row-level security policy')) {
+        return 'Access denied. You do not have permission to perform this action.';
+    }
+
+    if (message.includes('foreign key constraint')) {
+        return 'Cannot complete this action because this record is linked to other data.';
+    }
+
+    return message;
+}

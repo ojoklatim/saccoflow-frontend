@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Building2, Users, Plus, LogOut, Shield, Menu, X, Mail, Globe } from 'lucide-react';
-import { supabase } from './supabase';
+import { supabase, formatSupabaseError } from './supabase';
 import './dashboard.css';
 
 interface AdminDashboardProps {
@@ -71,7 +71,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         ]);
 
         if (error) {
-            alert('Failed to add Sacco: ' + error.message);
+            alert('Failed to add Sacco: ' + formatSupabaseError(error));
             return;
         }
 
@@ -85,7 +85,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
         const { error } = await supabase.from('saccos').delete().eq('id', id);
         if (error) {
-            alert("Failed to delete: " + error.message);
+            alert("Failed to delete: " + formatSupabaseError(error));
         } else {
             fetchDashboardData();
         }
@@ -96,7 +96,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         const { error } = await supabase.from('saccos').update({ status: newStatus }).eq('id', id);
 
         if (error) {
-            alert("Failed to update status: " + error.message);
+            alert("Failed to update status: " + formatSupabaseError(error));
         } else {
             fetchDashboardData();
         }

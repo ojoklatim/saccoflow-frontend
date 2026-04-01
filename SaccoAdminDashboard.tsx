@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from './supabase';
+import { supabase, formatSupabaseError } from './supabase';
 import {
     LayoutDashboard, Users, ArrowRightLeft, CreditCard,
     FileText, ShieldAlert, LogOut, Bell, Menu, Plus, Search, Filter, Briefcase, X
@@ -23,6 +23,7 @@ interface Transaction {
     type: 'Deposit' | 'Withdrawal' | 'Loan';
     amount: number;
     date: string;
+    systemDate: string; // Time record was entered
     note: string;
 }
 
@@ -65,7 +66,13 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
 
     // Modal state
     const [showAddTxn, setShowAddTxn] = useState(false);
-    const [txnForm, setTxnForm] = useState({ memberId: '', type: 'Deposit', amount: '', note: '' });
+    const [txnForm, setTxnForm] = useState({ 
+        memberId: '', 
+        type: 'Deposit' as 'Deposit' | 'Withdrawal' | 'Loan', 
+        amount: '', 
+        note: '',
+        date: new Date().toISOString().split('T')[0] // Default to today
+    });
 
     const [showNotif, setShowNotif] = useState(false);
     const [notifTitle, setNotifTitle] = useState('');
@@ -140,6 +147,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                 type: t.type,
                 amount: t.amount,
                 date: t.transaction_date,
+                systemDate: new Date(t.created_at).toLocaleString(), // Actual record time
                 note: t.note
             })));
         }
@@ -193,15 +201,22 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
             type: txnForm.type,
             amount: Number(txnForm.amount),
             note: txnForm.note,
+            transaction_date: txnForm.date, // User-selected payment date
             created_by: userId
         }]);
 
         if (error) {
-            alert('Failed to save transaction: ' + error.message);
+            alert('Failed to save transaction: ' + formatSupabaseError(error));
             return;
         }
 
-        setTxnForm({ memberId: '', type: 'Deposit', amount: '', note: '' });
+        setTxnForm({ 
+            memberId: '', 
+            type: 'Deposit', 
+            amount: '', 
+            note: '',
+            date: new Date().toISOString().split('T')[0]
+        });
         setShowAddTxn(false);
         if (saccoId) fetchSaccoData(saccoId);
     }
@@ -221,7 +236,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
         }).eq('id', id);
 
         if (error) {
-            alert("Error updating loan: " + error.message);
+            alert("Error updating loan: " + formatSupabaseError(error));
         } else {
             // Send member-specific notification about loan decision
             if (memberId) {
@@ -255,12 +270,42 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
         setLoading(false);
 
         if (error) {
-            alert('Failed to send notification: ' + error.message);
+            alert('Failed to send notification: ' + formatSupabaseError(error));
             return;
         }
 
         setNotifSent(true);
         setTimeout(() => { setNotifSent(false); setNotifTitle(''); setNotifBody(''); setShowNotif(false); }, 2000);
+    }
+
+    // ─── Member handlers ──────────────────────────────────────
+    async function deleteMember(id: string) {
+        if (id === userId) {
+            alert("You cannot delete your own admin account.");
+            return;
+        }
+        
+        const confirmMsg = "Are you sure you want to delete this member? \n\nThis will permanently remove their:\n- Profile & Personal Info\n- All Savings Records\n- All Loan Records\n- All Transactions\n\nThis action CANNOT be undone.";
+        if (!window.confirm(confirmMsg)) return;
+
+        setLoading(true);
+        try {
+            // 1. Delete the profile record
+            // Foreign key CASCADE should handle the rest of the related public data
+            const { error } = await supabase.from('profiles').delete().eq('id', id);
+            
+            if (error) throw error;
+
+            alert("✅ Member and all associated records deleted successfully.");
+            
+            // 2. Refresh the UI
+            if (saccoId) await fetchSaccoData(saccoId);
+        } catch (error: any) {
+            console.error("Delete Error:", error);
+            alert("❌ Failed to delete member: " + formatSupabaseError(error));
+        } finally {
+            setLoading(false);
+        }
     }
 
     const handleLogoutClick = async () => {
@@ -359,14 +404,17 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                                 <td><span style={{ padding: '4px 10px', borderRadius: '999px', fontSize: '0.8rem', background: m.status === 'Active' ? '#e6f4ea' : '#fce8e8', color: m.status === 'Active' ? '#2d7a47' : '#c53030' }}>{m.status}</span></td>
                                                 <td>{m.dateJoined}</td>
                                                     <td>
-                                                        <button className="action-link" onClick={() => { 
-                                                            setEditMember(m); 
-                                                            setEditMemberName(m.name);
-                                                            setEditMemberPhone(m.phone === '—' ? '' : m.phone); 
-                                                            setEditMemberEmail(m.email === '—' ? '' : m.email);
-                                                            setEditMemberStatus(m.status);
-                                                            setShowEditMemberModal(true); 
-                                                        }}>Edit</button>
+                                                        <div style={{ display: 'flex', gap: '12px' }}>
+                                                            <button className="action-link" onClick={() => { 
+                                                                setEditMember(m); 
+                                                                setEditMemberName(m.name);
+                                                                setEditMemberPhone(m.phone === '—' ? '' : m.phone); 
+                                                                setEditMemberEmail(m.email === '—' ? '' : m.email);
+                                                                setEditMemberStatus(m.status);
+                                                                setShowEditMemberModal(true); 
+                                                            }}>Edit</button>
+                                                            <button className="action-link" style={{ color: '#e53e3e' }} onClick={() => deleteMember(m.id)}>Delete</button>
+                                                        </div>
                                                     </td>
                                             </tr>
                                         ))}
@@ -397,7 +445,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                 <div className="dash-empty-state"><ArrowRightLeft size={48} strokeWidth={1.5} /><p>No transactions match the filter.</p></div>
                             ) : (
                                 <table className="dash-table">
-                                    <thead><tr><th>Member</th><th>Type</th><th>Amount (UGX)</th><th>Date</th><th>Note</th></tr></thead>
+                                    <thead><tr><th>Member</th><th>Type</th><th>Amount (UGX)</th><th>Payment Date</th><th>Logged At</th><th>Note</th></tr></thead>
                                     <tbody>
                                         {filteredTxns.map(t => (
                                             <tr key={t.id}>
@@ -405,6 +453,7 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                                                 <td><span style={{ padding: '4px 10px', borderRadius: '999px', fontSize: '0.8rem', background: t.type === 'Deposit' ? '#e6f4ea' : t.type === 'Loan' ? '#e8f0fe' : '#fce8e8', color: t.type === 'Deposit' ? '#2d7a47' : t.type === 'Loan' ? '#1a56db' : '#c53030' }}>{t.type}</span></td>
                                                 <td>{t.amount.toLocaleString()}</td>
                                                 <td>{t.date}</td>
+                                                <td style={{ fontSize: '0.8rem', color: '#718096' }}>{t.systemDate}</td>
                                                 <td>{t.note || '—'}</td>
                                             </tr>
                                         ))}
@@ -656,6 +705,16 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
                             <div>
                                 <label className="label-field">Amount (UGX) *</label>
                                 <input type="number" className="input-field" placeholder="0" value={txnForm.amount} onChange={e => setTxnForm(f => ({ ...f, amount: e.target.value }))} />
+                            </div>
+                            <div>
+                                <label className="label-field">Transaction Date *</label>
+                                <input 
+                                    type="date" 
+                                    className="input-field" 
+                                    value={txnForm.date} 
+                                    onChange={e => setTxnForm(f => ({ ...f, date: e.target.value }))} 
+                                    max={new Date().toISOString().split('T')[0]} 
+                                />
                             </div>
                             <div style={{ gridColumn: '1 / -1' }}>
                                 <label className="label-field">Note (Optional)</label>

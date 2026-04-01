@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from './supabase';
+import { supabase, formatSupabaseError } from './supabase';
 import {
     Home, CreditCard, ArrowRightLeft, Bell, LogOut, Filter, Menu, X
 } from 'lucide-react';
@@ -130,7 +130,7 @@ export default function MemberDashboard({ onLogout }: MemberDashboardProps) {
         setLoanLoading(false);
 
         if (error) {
-            alert("Error requesting loan: " + error.message);
+            alert("Error requesting loan: " + formatSupabaseError(error));
             return;
         }
 
@@ -222,7 +222,7 @@ export default function MemberDashboard({ onLogout }: MemberDashboardProps) {
                                                     setEditPhoneMode(false);
                                                     setPhoneValue('');
                                                 } catch (err: any) {
-                                                    alert('Failed to update phone: ' + (err?.message || String(err)));
+                                                    alert('Failed to update phone: ' + formatSupabaseError(err));
                                                 } finally {
                                                     setPhoneSaving(false);
                                                 }

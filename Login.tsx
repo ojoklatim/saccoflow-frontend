@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, isSupabaseConfigured, formatSupabaseError } from './supabase';
 import './index.css';
 
 interface LoginProps {
@@ -41,15 +41,22 @@ export default function Login({ onBack, onLogin }: LoginProps) {
 
                 if (data.session) {
                     // Fetch user profile to determine their dashboard role
+                    // Using maybeSingle() to avoid "Cannot coerce..." error if trigger is slow
                     const { data: profile, error: profileError } = await supabase
                         .from('profiles')
                         .select('role')
                         .eq('id', data.user.id)
-                        .single();
+                        .maybeSingle();
 
                     if (profileError) throw profileError;
 
-                    onLogin(profile?.role || 'member', data.session);
+                    if (!profile) {
+                        setErrorMsg('Account not found');
+                        setLoading(false);
+                        return;
+                    }
+
+                    onLogin(profile.role, data.session);
                 }
             } else {
                 // Check if this email is a Sacco admin email
