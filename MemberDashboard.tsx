@@ -117,7 +117,7 @@ export default function MemberDashboard({ onLogout }: MemberDashboardProps) {
         e.preventDefault();
         if (!loanForm.amount || !loanForm.purpose || !loanForm.repaymentDate || !saccoId) return;
 
-        const maxLoan = totalSavings * 0.6;
+        const maxLoan = savingsBalance * 0.6;
         if (Number(loanForm.amount) > maxLoan) {
             alert(`You can only request up to 60% of your total savings (Max: UGX ${maxLoan.toLocaleString()}).`);
             return;
@@ -310,7 +310,7 @@ export default function MemberDashboard({ onLogout }: MemberDashboardProps) {
                                     <hr style={{ border: 'none', borderTop: '1px solid #e3e8ee', margin: '32px 0' }} />
                                     <h4 style={{ marginBottom: '16px', color: '#1a1f36' }}>Loan Details</h4>
                                     <div className="form-grid">
-                                        <div><label className="label-field">Desired Loan Amount (UGX) *</label><input type="number" className="input-field" placeholder={`Max allowed: UGX ${(totalSavings * 0.6).toLocaleString()}`} required value={loanForm.amount} onChange={e => setLoanForm({ ...loanForm, amount: e.target.value })} disabled={loanLoading} /></div>
+                                        <div><label className="label-field">Desired Loan Amount (UGX) *</label><input type="number" className="input-field" placeholder={`Max allowed: UGX ${(savingsBalance * 0.6).toLocaleString()}`} required value={loanForm.amount} onChange={e => setLoanForm({ ...loanForm, amount: e.target.value })} disabled={loanLoading} /></div>
                                         <div><label className="label-field">Repayment Deadline *</label>
                                             <input
                                                 type="date"
