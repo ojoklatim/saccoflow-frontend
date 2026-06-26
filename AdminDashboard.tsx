@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Building2, Users, Plus, LogOut, Shield, Menu, X, Mail, Globe } from 'lucide-react';
+import { Building2, Users, Plus, LogOut, Shield, Menu, X, Mail, Globe, Trash2 } from 'lucide-react';
 import { supabase, formatSupabaseError } from './supabase';
 import './dashboard.css';
 
@@ -31,6 +31,13 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         status: 'Active' as const
     });
 
+    // Whitelist state variables
+    const [showManageAdminsModal, setShowManageAdminsModal] = useState(false);
+    const [selectedSaccoForAdmins, setSelectedSaccoForAdmins] = useState<Sacco | null>(null);
+    const [adminEmails, setAdminEmails] = useState<string[]>([]);
+    const [newAdminEmail, setNewAdminEmail] = useState('');
+    const [loadingAdmins, setLoadingAdmins] = useState(false);
+
     useEffect(() => {
         fetchDashboardData();
     }, []);
@@ -60,24 +67,89 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         e.preventDefault();
         if (!newSacco.name || !newSacco.email) return;
 
-        // Insert into Supabase
-        const { error } = await supabase.from('saccos').insert([
+        // Insert into Supabase and request returned row to get its ID
+        const { data, error } = await supabase.from('saccos').insert([
             {
                 name: newSacco.name,
                 email: newSacco.email,
                 location: newSacco.location || null,
                 status: newSacco.status
             }
-        ]);
+        ]).select();
 
         if (error) {
             alert('Failed to add Sacco: ' + formatSupabaseError(error));
             return;
         }
 
+        if (data && data.length > 0) {
+            const createdSacco = data[0];
+            // Whitelist primary email automatically in sacco_admin_emails
+            const { error: emailError } = await supabase.from('sacco_admin_emails').insert([
+                {
+                    sacco_id: createdSacco.id,
+                    email: newSacco.email.toLowerCase().trim()
+                }
+            ]);
+            if (emailError) {
+                console.error("Failed to whitelist primary admin email:", emailError);
+            }
+        }
+
         setNewSacco({ name: '', email: '', location: '', status: 'Active' });
         setShowAddModal(false);
         fetchDashboardData(); // Refresh table
+    };
+
+    // Fetch whitelisted emails for a Sacco
+    const fetchSaccoAdmins = async (saccoId: string) => {
+        setLoadingAdmins(true);
+        const { data, error } = await supabase
+            .from('sacco_admin_emails')
+            .select('email')
+            .eq('sacco_id', saccoId);
+        if (data) {
+            setAdminEmails(data.map(item => item.email));
+        } else if (error) {
+            console.error("Error fetching admin emails:", error);
+        }
+        setLoadingAdmins(false);
+    };
+
+    // Add extra admin email to whitelist
+    const handleAddAdminEmail = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!selectedSaccoForAdmins || !newAdminEmail) return;
+        const emailToInsert = newAdminEmail.trim().toLowerCase();
+        if (adminEmails.includes(emailToInsert)) {
+            alert("Email is already whitelisted.");
+            return;
+        }
+        const { error } = await supabase
+            .from('sacco_admin_emails')
+            .insert([{ sacco_id: selectedSaccoForAdmins.id, email: emailToInsert }]);
+        if (error) {
+            alert("Failed to whitelist admin email: " + formatSupabaseError(error));
+        } else {
+            setNewAdminEmail('');
+            fetchSaccoAdmins(selectedSaccoForAdmins.id);
+        }
+    };
+
+    // Remove email from whitelist
+    const handleRemoveAdminEmail = async (emailToRemove: string) => {
+        if (!selectedSaccoForAdmins) return;
+        if (!window.confirm(`Are you sure you want to remove ${emailToRemove} from the admin whitelist?`)) return;
+        const { error } = await supabase
+            .from('sacco_admin_emails')
+            .delete()
+            .eq('sacco_id', selectedSaccoForAdmins.id)
+            .eq('email', emailToRemove);
+        if (error) {
+            alert("Failed to remove admin email: " + formatSupabaseError(error));
+        } else {
+            fetchSaccoAdmins(selectedSaccoForAdmins.id);
+        }
     };
 
     const deleteSacco = async (id: string) => {
@@ -194,6 +266,13 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                                             </td>
                                             <td>
                                                 <div style={{ display: 'flex', gap: '12px' }}>
+                                                    <button className="action-link" onClick={() => {
+                                                        setSelectedSaccoForAdmins(s);
+                                                        setShowManageAdminsModal(true);
+                                                        fetchSaccoAdmins(s.id);
+                                                    }}>
+                                                        Admins
+                                                    </button>
                                                     <button className="action-link" onClick={() => toggleStatus(s.id, s.status)}>
                                                         {s.status === 'Active' ? 'Suspend' : 'Activate'}
                                                     </button>
@@ -271,6 +350,77 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                                 <button type="submit" className="btn-dark">Register SACCO</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Manage Sacco Admins Whitelist Modal */}
+            {showManageAdminsModal && selectedSaccoForAdmins && (
+                <div className="modal-backdrop" onClick={() => setShowManageAdminsModal(false)}>
+                    <div className="modal-box" onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3>Manage Admins — {selectedSaccoForAdmins.name}</h3>
+                            <button className="btn-icon" onClick={() => setShowManageAdminsModal(false)}><X size={18} /></button>
+                        </div>
+                        <div style={{ padding: '24px' }}>
+                            <p style={{ fontSize: '0.9rem', color: '#6b7280', marginBottom: '16px' }}>
+                                Add or remove email addresses whitelisted to register as admins for this SACCO.
+                            </p>
+
+                            <form onSubmit={handleAddAdminEmail} style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', position: 'relative', flex: 1 }}>
+                                    <Mail size={18} style={{ position: 'absolute', left: '12px', color: '#a0aec0' }} />
+                                    <input
+                                        type="email"
+                                        className="input-field"
+                                        style={{ paddingLeft: '40px', margin: 0 }}
+                                        placeholder="admin-email@sacco.com"
+                                        required
+                                        value={newAdminEmail}
+                                        onChange={e => setNewAdminEmail(e.target.value)}
+                                    />
+                                </div>
+                                <button type="submit" className="btn-dark" style={{ whiteSpace: 'nowrap' }}>
+                                    Add Admin
+                                </button>
+                            </form>
+
+                            <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #e3e8ee', borderRadius: '6px' }}>
+                                {loadingAdmins ? (
+                                    <div style={{ padding: '16px', textAlign: 'center', color: '#718096' }}>Loading admins...</div>
+                                ) : adminEmails.length === 0 ? (
+                                    <div style={{ padding: '16px', textAlign: 'center', color: '#718096' }}>No admins whitelisted yet.</div>
+                                ) : (
+                                    <table className="dash-table" style={{ margin: 0 }}>
+                                        <thead>
+                                            <tr>
+                                                <th>Whitelisted Email</th>
+                                                <th style={{ width: '80px', textAlign: 'right' }}>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {adminEmails.map(email => (
+                                                <tr key={email}>
+                                                    <td style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}>{email}</td>
+                                                    <td style={{ textAlign: 'right' }}>
+                                                        <button 
+                                                            className="btn-icon" 
+                                                            style={{ color: '#e53e3e', background: 'none', border: 'none', cursor: 'pointer' }}
+                                                            onClick={() => handleRemoveAdminEmail(email)}
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+                        </div>
+                        <div className="modal-footer">
+                            <button type="button" className="btn-dark" onClick={() => setShowManageAdminsModal(false)}>Close</button>
+                        </div>
                     </div>
                 </div>
             )}
