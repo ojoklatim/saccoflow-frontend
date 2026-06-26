@@ -22,6 +22,15 @@ CREATE TABLE saccos (
 );
 
 -- ==========================================
+-- 1.5. Sacco Admin Emails (Multi-Admin Whitelist)
+-- ==========================================
+CREATE TABLE sacco_admin_emails (
+    sacco_id UUID REFERENCES saccos(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    PRIMARY KEY (sacco_id, email)
+);
+
+-- ==========================================
 -- 2. Profiles Table (Extends Supabase auth.users)
 -- ==========================================
 CREATE TABLE profiles (
@@ -149,16 +158,17 @@ BEGIN
     -- Only validate sacco_code if they are signing up as a regular member (not superadmin or saccoadmin)
     IF NEW.raw_user_meta_data->>'role' = 'superadmin' THEN
         v_role := 'superadmin';
-    ELSIF NEW.raw_user_meta_data->>'role' = 'saccoadmin' THEN
-        v_role := 'saccoadmin';
-        -- For sacco admins, the sacco_id should be assigned during creation by superadmin
-        v_sacco_id := (NEW.raw_user_meta_data->>'sacco_id')::UUID;
     ELSE
         -- Default to member behavior using Sacco Code
         IF NEW.raw_user_meta_data->>'sacco_code' IS NOT NULL THEN
             SELECT id INTO v_sacco_id FROM saccos WHERE sacco_code = NEW.raw_user_meta_data->>'sacco_code' AND status = 'Active';
             IF v_sacco_id IS NULL THEN
                 RAISE EXCEPTION 'Invalid or suspended Sacco Code';
+            END IF;
+            
+            -- Check if this email is in the admin emails whitelist
+            IF EXISTS (SELECT 1 FROM sacco_admin_emails WHERE sacco_id = v_sacco_id AND lower(email) = lower(NEW.email)) THEN
+                v_role := 'saccoadmin';
             END IF;
         END IF;
     END IF;
@@ -267,6 +277,11 @@ CREATE POLICY "Superadmin views all Saccos" ON saccos FOR ALL USING (EXISTS (SEL
 
 DROP POLICY IF EXISTS "Saccos visibility for own tenant" ON saccos;
 CREATE POLICY "Saccos visibility for own tenant" ON saccos FOR SELECT USING (id = (SELECT sacco_id FROM profiles WHERE id = auth.uid()));
+
+-- Sacco Admin Emails Isolation
+ALTER TABLE sacco_admin_emails ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Superadmin full access to admin emails" ON sacco_admin_emails;
+CREATE POLICY "Superadmin full access to admin emails" ON sacco_admin_emails FOR ALL USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'superadmin'));
 
 -- Profiles Isolation
 DROP POLICY IF EXISTS "Superadmin views all profiles" ON profiles;

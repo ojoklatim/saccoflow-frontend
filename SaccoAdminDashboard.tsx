@@ -285,24 +285,23 @@ export default function SaccoAdminDashboard({ onLogout }: SaccoAdminProps) {
             return;
         }
         
-        const confirmMsg = "Are you sure you want to delete this member? \n\nThis will permanently remove their:\n- Profile & Personal Info\n- All Savings Records\n- All Loan Records\n- All Transactions\n\nThis action CANNOT be undone.";
+        const confirmMsg = "Are you sure you want to completely erase this member from the database?\n\nThis will permanently remove their:\n- Authentication Account\n- Profile & Personal Info\n- All Savings Records\n- All Loan Records\n- All Transactions\n\nThis action CANNOT be undone.";
         if (!window.confirm(confirmMsg)) return;
 
         setLoading(true);
         try {
-            // 1. Delete the profile record
-            // Foreign key CASCADE should handle the rest of the related public data
-            const { error } = await supabase.from('profiles').delete().eq('id', id);
+            // Delete the member using the secure RPC which erases auth.users
+            const { error } = await supabase.rpc('delete_member', { target_member_id: id });
             
             if (error) throw error;
 
-            alert("✅ Member and all associated records deleted successfully.");
+            alert("✅ Member completely erased from the database.");
             
-            // 2. Refresh the UI
+            // Refresh the UI
             if (saccoId) await fetchSaccoData(saccoId);
         } catch (error: any) {
             console.error("Delete Error:", error);
-            alert("❌ Failed to delete member: " + formatSupabaseError(error));
+            alert("❌ Failed to completely delete member: " + formatSupabaseError(error));
         } finally {
             setLoading(false);
         }
